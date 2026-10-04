@@ -8,6 +8,7 @@ const express = require('express');
 
 const db = require('./lib/db');
 const fx = require('./lib/fx');
+const ratelimit = require('./lib/ratelimit');
 const { streamChat, DEFAULT_MODEL } = require('./lib/deepseek');
 
 const app = express();
@@ -175,6 +176,15 @@ app.get('/api/fx', async (req, res) => {
 app.post('/api/run-once', async (req, res) => {
   const { tool, system, input } = req.body || {};
   const model = req.body && req.body.model;
+
+  // 公网试用限流：保护模型额度
+  const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || 'unknown';
+  const limit = ratelimit.check(ip);
+
+  if (!limit.ok) {
+    res.status(429).json({ ok: false, message: limit.message });
+    return;
+  }
 
   if (!input || !String(input).trim()) {
     res.status(400).json({ ok: false, message: 'input 不能为空' });
