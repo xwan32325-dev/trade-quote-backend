@@ -13,6 +13,21 @@ const app = express();
 const PORT = Number(process.env.PORT) || 8787;
 
 app.use(express.json({ limit: '1mb' }));
+
+// CORS：H5 调试页面（5174）和小程序开发者工具需要跨域访问这些接口
+app.use((req, res, next) => {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,DELETE,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
+  if (req.method === 'OPTIONS') {
+    res.sendStatus(204);
+    return;
+  }
+
+  next();
+});
+
 // 静态资源目录（index.html / app.js / style.css）
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -138,6 +153,51 @@ app.post('/api/run', async (req, res) => {
   } finally {
     res.off('close', onClose);
     if (!res.writableEnded) res.end();
+  }
+});
+
+// 非流式生成接口：小程序（uni.request 不方便处理 SSE）使用这个
+app.post('/api/run-once', async (req, res) => {
+  const { tool, system, input } = req.body || {};
+  const model = req.body && req.body.model;
+
+  if (!input || !String(input).trim()) {
+    res.status(400).json({ ok: false, message: 'input 不能为空' });
+    return;
+  }
+
+  const useSystem = system && String(system).trim()
+    ? String(system)
+    : (TOOL_FALLBACK_SYSTEM[tool] || '');
+
+  const startedAt = Date.now();
+
+  try {
+    const { text, usage } = await streamChat({
+      system: useSystem,
+      input: String(input),
+      model,
+      onDelta: () => {}, // 非流式：不逐字推送，最后一次性返回
+    });
+
+    const elapsedMs = Date.now() - startedAt;
+    const tokens = usage && usage.completion_tokens != null
+      ? usage.completion_tokens
+      : Math.max(1, Math.round(text.length / 2));
+
+    // 与 /api/run 保持一致：成功后写入历史
+    db.insertRun({
+      tool,
+      model: model || DEFAULT_MODEL,
+      input: String(input),
+      output: text,
+      elapsedMs,
+    });
+
+    res.json({ text, elapsedMs, tokens });
+  } catch (err) {
+    // 把上游错误信息透传给调用方，不要吞掉
+    res.status(502).json({ ok: false, message: err && err.message ? err.message : String(err) });
   }
 });
 
