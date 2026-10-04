@@ -207,6 +207,8 @@ select:focus, textarea:focus { outline: 1px solid var(--accent); }
   line-height: 1.7;
   overflow-y: auto;
 }
+/* 首字到达前的等待态 */
+.output.waiting { color: var(--muted); font-style: italic; }
 
 /* 提示条 */
 .toast {

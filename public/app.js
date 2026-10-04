@@ -44,6 +44,10 @@ let currentTool = 'rewrite';
 let running = false;
 let controller = null;
 let hasKey = true;
+let waitTimer = null;
+let waiting = false;
+// 流式输出是否跟随到底部：用户手动上滚后就不再强制打断。
+let stickToBottom = true;
 
 // 每个工具单独记住用户改过的提示词，切 tab 不丢。
 const systemByTool = {};
@@ -61,6 +65,30 @@ function setRunningUI(isRunning) {
   el.runBtn.textContent = isRunning ? '停止' : '生成';
   el.runBtn.classList.toggle('btn-stop', isRunning);
   el.runBtn.classList.toggle('btn-primary', !isRunning);
+}
+
+// 首字到达前的等待态：显示「思考中… 已等待 N 秒」，每 200ms 刷新一次。
+function startWaiting() {
+  waiting = true;
+  const t0 = Date.now();
+  el.output.classList.add('waiting');
+  el.output.textContent = '思考中… 已等待 0 秒';
+  clearInterval(waitTimer);
+  waitTimer = setInterval(() => {
+    const secs = Math.floor((Date.now() - t0) / 1000);
+    el.output.textContent = `思考中… 已等待 ${secs} 秒`;
+    if (stickToBottom) el.output.scrollTop = el.output.scrollHeight;
+  }, 200);
+}
+
+// 首个字符、done 或 error 到达后清除等待态。
+function stopWaiting() {
+  clearInterval(waitTimer);
+  waitTimer = null;
+  if (!waiting) return;
+  waiting = false;
+  el.output.classList.remove('waiting');
+  el.output.textContent = '';
 }
 
 function switchTool(tool) {
@@ -108,6 +136,11 @@ el.copyBtn.addEventListener('click', async () => {
   }
 });
 
+// 记录用户是否还在底部附近，用于决定是否自动跟随滚动。
+el.output.addEventListener('scroll', () => {
+  stickToBottom = el.output.scrollHeight - el.output.scrollTop - el.output.clientHeight < 24;
+});
+
 // 生成 / 停止
 el.runBtn.addEventListener('click', () => {
   if (running) {
@@ -126,6 +159,8 @@ async function run() {
   setRunningUI(true);
   el.output.textContent = '';
   el.meta.textContent = '生成中…';
+  stickToBottom = true;
+  startWaiting();
 
   const started = Date.now();
   let received = 0;
@@ -172,10 +207,12 @@ async function run() {
         try { evt = JSON.parse(payload); } catch (_) { continue; }
 
         if (evt.type === 'delta' && evt.text) {
+          if (waiting) stopWaiting();          // 首字到达，撤掉等待态
           received += evt.text.length;
           el.output.textContent += evt.text;   // 逐字追加，形成打字机效果
-          el.output.scrollTop = el.output.scrollHeight;
+          if (stickToBottom) el.output.scrollTop = el.output.scrollHeight;
         } else if (evt.type === 'done') {
+          stopWaiting();
           const secs = (evt.elapsedMs / 1000).toFixed(2);
           const tokenText = evt.tokensEstimated ? `~${evt.tokens} tokens（估算）` : `${evt.tokens} tokens`;
           el.meta.textContent = `耗时 ${secs}s · ${evt.chars} 字 · ${tokenText}`;
@@ -186,6 +223,7 @@ async function run() {
       }
     }
   } catch (err) {
+    stopWaiting();   // 出错或用户停止时同样撤掉等待态
     if (err.name === 'AbortError') {
       const secs = ((Date.now() - started) / 1000).toFixed(2);
       el.meta.textContent = `已停止 · 耗时 ${secs}s · 已输出 ${received} 字`;
@@ -195,6 +233,7 @@ async function run() {
       el.output.textContent += (el.output.textContent ? '\n\n' : '') + '[错误] ' + (err.message || '生成失败');
     }
   } finally {
+    stopWaiting();   // 流异常结束时兜底清除等待态
     setRunningUI(false);
     controller = null;
   }
