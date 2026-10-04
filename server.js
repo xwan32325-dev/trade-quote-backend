@@ -10,6 +10,7 @@ const db = require('./lib/db');
 const fx = require('./lib/fx');
 const ratelimit = require('./lib/ratelimit');
 const vision = require('./lib/vision');
+const quotePdf = require('./lib/quote-pdf');
 const { streamChat, DEFAULT_MODEL, normalizeBaseUrl } = require('./lib/deepseek');
 
 const app = express();
@@ -258,6 +259,75 @@ app.post('/api/parse-image', async (req, res) => {
     res.status(502).json({ ok: false, message: err && err.message ? err.message : String(err) });
   }
 });
+
+// 报价单导出：同一份数据可出 PDF 或 PNG（图片方便直接发客户）
+// GET 版本给小程序 uni.downloadFile 用（它只支持 GET）；参数 data 是 URL 编码的 JSON
+function buildQuoteDocHandler(getParams) {
+  return async (req, res) => {
+    let quote;
+    let company;
+    let format;
+
+    try {
+      if (getParams) {
+        // 注意：Express 已经把 query 解码过一次，这里直接 parse；失败再兜底解一次
+        const raw = String(req.query.data || '');
+        let parsed;
+
+        try {
+          parsed = JSON.parse(raw);
+        } catch (e) {
+          parsed = JSON.parse(decodeURIComponent(raw));
+        }
+
+        quote = parsed.quote;
+        company = parsed.company;
+        format = parsed.format;
+      } else {
+        quote = (req.body || {}).quote;
+        company = (req.body || {}).company;
+        format = (req.body || {}).format;
+      }
+    } catch (e) {
+      res.status(400).json({ ok: false, message: 'data 参数不是合法 JSON' });
+      return;
+    }
+
+    if (!quote || typeof quote !== 'object') {
+      res.status(400).json({ ok: false, message: '缺少 quote 数据' });
+      return;
+    }
+
+    const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || 'unknown';
+    const limit = ratelimit.check(ip);
+
+    if (!limit.ok) {
+      res.status(429).json({ ok: false, message: limit.message });
+      return;
+    }
+
+    const isPng = format === 'png';
+
+    try {
+      if (isPng) {
+        const png = await quotePdf.renderQuotePng({ quote, company });
+        res.setHeader('Content-Type', 'image/png');
+        res.setHeader('Content-Disposition', 'inline; filename="quotation.png"');
+        res.send(png);
+      } else {
+        const pdf = await quotePdf.renderQuotePdf({ quote, company });
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', 'inline; filename="quotation.pdf"');
+        res.send(pdf);
+      }
+    } catch (err) {
+      res.status(502).json({ ok: false, message: (err && err.message) || String(err) });
+    }
+  };
+}
+
+app.post('/api/quote-doc', buildQuoteDocHandler(false));
+app.get('/api/quote-doc', buildQuoteDocHandler(true));
 
 app.listen(PORT, () => {
   console.log(`[ai-toolbox] 服务已启动: http://localhost:${PORT}`);
