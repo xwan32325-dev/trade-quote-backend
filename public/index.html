@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI 工具箱</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="topbar">
+    <h1>AI 工具箱</h1>
+    <div class="topbar-right">
+      <label class="model-label" for="model">模型</label>
+      <select id="model">
+        <option value="deepseek-flash" selected>deepseek-flash</option>
+        <option value="deepseek-v4-pro">deepseek-v4-pro</option>
+      </select>
+      <span id="health-badge" class="badge badge-unknown">检查中…</span>
+    </div>
+  </header>
+
+  <div id="config-warning" class="config-warning" hidden>
+    服务端未配置模型密钥，无法生成。请在项目根目录的 .env 中填写后重启服务。
+  </div>
+
+  <main class="layout">
+    <!-- 左侧：历史记录 -->
+    <aside class="sidebar">
+      <div class="sidebar-head">
+        <span>历史记录</span>
+        <button id="refresh-history" class="btn-ghost" type="button" title="刷新">刷新</button>
+      </div>
+      <ul id="history-list" class="history-list"></ul>
+    </aside>
+
+    <!-- 右侧：工具主区域 -->
+    <section class="workspace">
+      <nav class="tabs" id="tabs">
+        <button class="tab active" data-tool="rewrite" type="button">智能改写</button>
+        <button class="tab" data-tool="xiaohongshu" type="button">小红书文案</button>
+        <button class="tab" data-tool="script" type="button">口播稿</button>
+        <button class="tab" data-tool="translate" type="button">中英互译</button>
+      </nav>
+
+      <label class="field-label" for="system">系统提示词（可编辑）</label>
+      <textarea id="system" class="system-prompt" rows="4"></textarea>
+
+      <label class="field-label" for="input">输入内容</label>
+      <textarea id="input" class="user-input" rows="6" placeholder="在这里粘贴要处理的文本…"></textarea>
+
+      <div class="actions">
+        <button id="run-btn" class="btn-primary" type="button">生成</button>
+        <button id="reset-system" class="btn-ghost" type="button">恢复默认提示词</button>
+        <span id="meta" class="meta"></span>
+      </div>
+
+      <div class="output-wrap">
+        <div class="output-head">
+          <span>输出</span>
+          <button id="copy-btn" class="btn-ghost" type="button">复制</button>
+        </div>
+        <pre id="output" class="output"></pre>
+      </div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
