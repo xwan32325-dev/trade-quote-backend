@@ -7,6 +7,7 @@ const path = require('node:path');
 const express = require('express');
 
 const db = require('./lib/db');
+const fx = require('./lib/fx');
 const { streamChat, DEFAULT_MODEL } = require('./lib/deepseek');
 
 const app = express();
@@ -153,6 +154,20 @@ app.post('/api/run', async (req, res) => {
   } finally {
     res.off('close', onClose);
     if (!res.writableEnded) res.end();
+  }
+});
+
+// 实时汇率：多源回退 + 30 分钟缓存，供报价页自动填入
+app.get('/api/fx', async (req, res) => {
+  const base = String(req.query.from || 'USD').toUpperCase();
+  const quote = String(req.query.to || 'CNY').toUpperCase();
+  const force = req.query.force === '1';
+
+  try {
+    const data = await fx.getRate(base, quote, { force });
+    res.json({ ok: true, ...data, ttlSeconds: Math.round(fx.CACHE_TTL_MS / 1000) });
+  } catch (err) {
+    res.status(502).json({ ok: false, message: err.message, errors: err.errors || [] });
   }
 });
 
