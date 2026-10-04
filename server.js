@@ -9,7 +9,8 @@ const express = require('express');
 const db = require('./lib/db');
 const fx = require('./lib/fx');
 const ratelimit = require('./lib/ratelimit');
-const { streamChat, DEFAULT_MODEL } = require('./lib/deepseek');
+const vision = require('./lib/vision');
+const { streamChat, DEFAULT_MODEL, normalizeBaseUrl } = require('./lib/deepseek');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 8787;
@@ -222,6 +223,38 @@ app.post('/api/run-once', async (req, res) => {
     res.json({ text, elapsedMs, tokens });
   } catch (err) {
     // 把上游错误信息透传给调用方，不要吞掉
+    res.status(502).json({ ok: false, message: err && err.message ? err.message : String(err) });
+  }
+});
+
+// 拍照填单：上传单据照片 → 结构化抽取字段（deepseek-flash 视觉）
+app.post('/api/parse-image', async (req, res) => {
+  const ip = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || req.socket.remoteAddress || 'unknown';
+  const limit = ratelimit.check(ip);
+
+  if (!limit.ok) {
+    res.status(429).json({ ok: false, message: limit.message });
+    return;
+  }
+
+  const image = req.body && req.body.image;
+
+  if (!image || typeof image !== 'string') {
+    res.status(400).json({ ok: false, message: '缺少 image（需要 data:image/... 的 base64 数据）' });
+    return;
+  }
+
+  const apiKey = process.env.DEEPSEEK_API_KEY;
+
+  if (!apiKey) {
+    res.status(500).json({ ok: false, message: '服务端未配置 DEEPSEEK_API_KEY' });
+    return;
+  }
+
+  try {
+    const result = await vision.parseImage(image, apiKey, normalizeBaseUrl(process.env.DEEPSEEK_BASE_URL));
+    res.json({ ok: true, ...result });
+  } catch (err) {
     res.status(502).json({ ok: false, message: err && err.message ? err.message : String(err) });
   }
 });
