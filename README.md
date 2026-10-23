@@ -1,124 +1,105 @@
-# AI 工具箱（ai-toolbox）
+# trade-quote-backend（原 ai-toolbox）
 
-一个可本机运行、也可直接上线的全栈 AI 工具站。所有模型调用都在 Node 后端完成，**API Key 绝不下发到浏览器**。
+「[外贸算价助手](https://github.com/<your-github-username>/trade-quote-miniapp)」的后端服务，同时也是一个可独立运行的 AI 工具箱。
+**所有模型调用都在服务端完成，API Key 绝不下发到前端。**
 
-内置 4 个工具，全部支持流式（打字机）输出：
+![Node.js](https://img.shields.io/badge/Node.js-24-339933?logo=node.js&logoColor=white)
+![Express](https://img.shields.io/badge/Express-4-000000?logo=express&logoColor=white)
+![DeepSeek](https://img.shields.io/badge/DeepSeek-Chat%20%2B%20Vision-4d6bfe)
+![license](https://img.shields.io/badge/license-MIT-blue)
 
-| 工具 | 说明 |
-| --- | --- |
-| 智能改写 | 保留原意，去掉 AI 味，让文字更口语、更自然 |
-| 小红书文案 | 输出 3 个标题候选 + 带 emoji 的正文 + 5 个话题标签 |
-| 口播稿 | 前 3 秒钩子 + 分段正文 + 结尾引导互动，口语化短句，可直接照读 |
-| 中英互译 | 自动判断中英方向；中文译英文时额外给一版「口语版」 |
+## 接口
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/health` | 健康检查（含 `hasKey` 是否已配置 Key） |
+| POST | `/api/run` | DeepSeek 流式对话（SSE），逐块返回增量文本 |
+| POST | `/api/run-once` | 非流式一次性返回，带 IP 限流 |
+| GET | `/api/fx?from=USD&to=CNY` | 实时汇率：多数据源交叉校验 + 跨源择优取最高精度，30 分钟内存 + 磁盘缓存，返回涨跌幅、数据日期与精度标记 |
+| POST | `/api/parse-image` | 拍照填单：图片 → DeepSeek 视觉 → 结构化字段（多产品明细 / 客户名 / 箱规 / 税率），约 2~4 秒 |
+| GET/POST | `/api/quote-doc` | 报价单导出：Edge 无头渲染 HTML → **PDF（约 1.5 秒）** 或 PNG，支持多行产品明细 |
+| GET/DELETE | `/api/history` | AI 工具调用历史（`node:sqlite`） |
+
+### `/api/parse-image`
+
+```http
+POST /api/parse-image
+{ "image": "data:image/jpeg;base64,..." }
+
+→ 200 {
+  "ok": true,
+  "fields": {
+    "items": [
+      { "productName": "不锈钢保温杯 500ml", "qty": 1000, "price": 100, "vatRate": 13, "rebateRate": 13 }
+    ],
+    "customerName": "ABC Trading Co., Ltd.",
+    "currency": "CNY",
+    "cartonL": 50, "cartonW": 40, "cartonH": 30, "grossWeight": 12,
+    "notes": "交期30天，T/T 30% 定金"
+  },
+  "elapsedMs": 1820, "tokens": 342, "model": "deepseek-flash"
+}
+```
+
+设计要点：**识别不到就返回 null，绝不编造数字**；白名单字段 + 类型规整后再返回，避免脏数据污染表单。
+
+### `/api/quote-doc`
+
+```http
+GET /api/quote-doc?data=<encodeURIComponent(JSON)>&format=pdf   # 小程序 downloadFile 用（只支持 GET）
+POST /api/quote-doc  { "quote": {...}, "company": {...}, "format": "png" | "pdf" }
+```
+
+用 Edge/Chrome 无头打印 HTML，中文排版、表格、分页全部由浏览器保证；单价格式化支持 2~6 位小数，
+确保单据上「单价 × 数量 = 金额」「合计 = 各行之和」。
 
 ## 技术栈
 
-- 后端：Node.js 24 + Express 4
-- 前端：纯静态 HTML + CSS + 原生 JS（零构建，无需打包）
-- 数据库：Node 24 内置 `node:sqlite`（无需编译原生模块）
-- 模型：DeepSeek 官方 API（流式 `stream: true`）
+- Node.js 24 + Express 4（零构建前端，纯静态 HTML/CSS/JS）
+- `node:sqlite` 内置数据库（无需编译原生模块）
+- `puppeteer-core` + 本机 Edge 做 PDF/PNG 渲染（不下载额外浏览器）
+- DeepSeek 官方 API：`deepseek-flash`（文本 + 视觉）
 
 ## 快速开始
 
-1. 安装依赖：
+```bash
+npm install
+cp .env.example .env          # Windows: copy .env.example .env
+# 填入 DEEPSEEK_API_KEY
+npm start                     # 等价于 node --env-file=.env server.js
+# 打开 http://localhost:8787
+```
 
-   ```bash
-   npm install
-   ```
+`.env`：
 
-2. 配置环境变量：复制 `.env.example` 为 `.env`，填入真实的 Key：
+```
+DEEPSEEK_API_KEY=你的 DeepSeek API Key
+PORT=8787
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+```
 
-   ```
-   DEEPSEEK_API_KEY=你的 DeepSeek API Key
-   PORT=8787
-   DEEPSEEK_BASE_URL=https://api.deepseek.com
-   ```
-
-3. 启动（`npm start` 等价于 `node --env-file=.env server.js`）：
-
-   ```bash
-   npm start
-   ```
-
-4. 浏览器打开 http://localhost:8787
-
-> 若未配置 `DEEPSEEK_API_KEY`，服务仍能启动，`/api/health` 的 `hasKey` 会返回 `false`，页面上方会显示中文提示。
+未配置 Key 时服务仍可启动，`/api/health` 的 `hasKey` 返回 `false`，依赖模型的接口会明确报错。
 
 ## 目录结构
 
 ```
-ai-toolbox/
-  server.js            # Express 服务 + API 路由 + SSE 流式转发
-  lib/deepseek.js      # DeepSeek 流式调用封装（支持 AbortSignal，透传上游错误）
-  lib/db.js            # node:sqlite 封装：建表 / 插入 / 列表 / 删除
-  public/index.html    # 单页界面
-  public/app.js        # 前端逻辑（fetch + ReadableStream 读取 SSE）
-  public/style.css     # 样式
-  data/app.db          # SQLite 文件（自动创建，已被 .gitignore 忽略）
-  .env                 # 环境变量（已被 .gitignore 忽略）
-  .env.example         # 环境变量模板
+server.js            # Express 服务：路由、限流、CORS
+lib/deepseek.js      # DeepSeek 流式调用封装（AbortSignal、上游错误透传）
+lib/fx.js            # 多源汇率聚合 + 跨源精度择优 + 内存/磁盘缓存
+lib/vision.js        # 视觉结构化抽取（多产品明细，字段白名单 + 类型规整）
+lib/quote-pdf.js     # 报价单 HTML 模板 + Edge 无头渲染 PDF/PNG
+lib/ratelimit.js     # IP 限流（30 次/5 分钟，全局 600 次/天）
+lib/db.js            # node:sqlite：建表 / 插入 / 列表 / 删除
+public/              # 零构建前端（4 个 AI 工具）
+docs/tasks/          # 每次迭代的任务书（需求与验收口径）
 ```
 
-## 接口说明
+## 安全
 
-### `GET /api/health`
+- API Key 只在服务端读取，前端任何接口都不返回 Key
+- 公网暴露时：接口白名单（只放行必要路径）+ IP 限流 + 请求体大小限制
+- 图片识别接口限制 9 MB 以内，超时 90 秒自动中断
 
-健康检查。
+## License
 
-```json
-{ "status": "ok", "model": "deepseek-flash", "hasKey": true }
-```
-
-### `GET /api/history?limit=50`
-
-按时间倒序返回历史记录，`limit` 默认 50（上限 200）。
-
-```json
-{ "items": [ { "id": 1, "tool": "rewrite", "model": "deepseek-flash", "input": "…", "output": "…", "elapsed_ms": 1234, "created_at": "2026-10-04T12:00:00.000Z" } ] }
-```
-
-### `DELETE /api/history/:id`
-
-删除单条历史记录。
-
-```json
-{ "ok": true }
-```
-
-### `POST /api/run`（SSE 流）
-
-请求体：
-
-```json
-{ "tool": "rewrite", "system": "你是一个改写助手", "input": "要处理的文本", "model": "deepseek-flash" }
-```
-
-响应头：`Content-Type: text/event-stream`、`Cache-Control: no-cache`。
-
-事件流（每条以 `data: ` 开头，JSON 格式）：
-
-```
-data: {"type":"delta","text":"今天"}
-data: {"type":"delta","text":"天气"}
-…
-data: {"type":"done","elapsedMs":1234,"chars":456,"tokens":210,"tokensEstimated":false,"id":7}
-```
-
-出错时：
-
-```
-data: {"type":"error","message":"DeepSeek 接口返回 401：…"}
-```
-
-- `delta`：增量文本，前端逐字追加形成打字机效果
-- `done`：`elapsedMs` 耗时、`chars` 字符数、`tokens` token 数（优先用上游 `usage`，缺失时为估算值，`tokensEstimated` 标识）、`id` 为写入历史的记录 id
-- `error`：上游报错信息原样透传，不吞掉
-
-用户点「停止」或关闭页面时，服务端会通过 `res` / `req` 的 `close` 事件中止上游请求，避免继续消耗 token。
-
-## 可用模型
-
-- `deepseek-flash`（默认）
-- `deepseek-v4-pro`
-
-模型名通过请求体的 `model` 字段传入，服务端做白名单校验，非法值回退到默认模型。
+[MIT](LICENSE) © 2026
