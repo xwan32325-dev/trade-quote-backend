@@ -1,6 +1,6 @@
 # trade-quote-backend（原 ai-toolbox）
 
-「[外贸算价助手](https://github.com/<your-github-username>/trade-quote-miniapp)」的后端服务，同时也是一个可独立运行的 AI 工具箱。
+「[外贸算价助手](https://github.com/xwan32325-dev/trade-quote-miniapp)」的后端服务，同时也是一个可独立运行的 AI 工具箱。
 **所有模型调用都在服务端完成，API Key 绝不下发到前端。**
 
 ![Node.js](https://img.shields.io/badge/Node.js-24-339933?logo=node.js&logoColor=white)
